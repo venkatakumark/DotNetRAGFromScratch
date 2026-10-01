@@ -1,12 +1,39 @@
+using MyLlmApp.Core.LLM;
+using MyLlmApp.Core.RAG;
+using MyLlmApp.Api.Models;
+using MyLlmApp.Core.Configuration;
+
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
-// Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
+builder.Services.Configure<OllamaOptions>(
+    builder.Configuration.GetSection(
+        OllamaOptions.SectionName));
+
+builder.Services.Configure<QdrantOptions>(
+    builder.Configuration.GetSection(
+        QdrantOptions.SectionName));
+
+builder.Services.Configure<RagOptions>(
+    builder.Configuration.GetSection(
+        RagOptions.SectionName));
+
+// OpenAPI
 builder.Services.AddOpenApi();
+
+// RAG dependencies
+builder.Services.AddSingleton<EmbeddingService>();
+builder.Services.AddSingleton<VectorStore>();
+builder.Services.AddSingleton<QueryRewriter>();
+builder.Services.AddSingleton<HybridReranker>();
+
+builder.Services.AddScoped<ConversationHistory>();
+builder.Services.AddScoped<RagService>();
+
+// LLM provider
+builder.Services.AddSingleton<ILlmService, OllamaLlmService>();
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
@@ -14,28 +41,26 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
-var summaries = new[]
-{
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-};
-
-app.MapGet("/weatherforecast", () =>
-{
-    var forecast =  Enumerable.Range(1, 5).Select(index =>
-        new WeatherForecast
-        (
-            DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-            Random.Shared.Next(-20, 55),
-            summaries[Random.Shared.Next(summaries.Length)]
-        ))
-        .ToArray();
-    return forecast;
-})
-.WithName("GetWeatherForecast");
 app.MapGet("/", () => "MyLlmApp RAG API is running");
-app.Run();
+app.MapPost(
+    "/api/rag/ask",
+    async (
+        RagRequest request,
+        RagService ragService) =>
+    {
+        if (string.IsNullOrWhiteSpace(request.Question))
+        {
+            return Results.BadRequest(
+                new
+                {
+                    error = "Question is required."
+                });
+        }
 
-record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
-{
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
-}
+        RagResponse response =
+            await ragService.AskAsync(
+                request.Question);
+
+        return Results.Ok(response);
+    });
+app.Run();

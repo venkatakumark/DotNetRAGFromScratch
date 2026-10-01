@@ -1,4 +1,5 @@
-
+using Microsoft.Extensions.Options;
+using MyLlmApp.Core.Configuration;
 using MyLlmApp.Core.LLM;
 
 namespace MyLlmApp.Core.RAG;
@@ -11,13 +12,16 @@ public class RagService
     private readonly ConversationHistory _conversationHistory;
     private readonly HybridReranker _reranker;
     private readonly ILlmService _llmService;
+    private readonly RagOptions _options;
+
     public RagService(
         EmbeddingService embeddingService,
         VectorStore vectorStore,
         QueryRewriter queryRewriter,
         ConversationHistory conversationHistory,
         HybridReranker reranker,
-        ILlmService llmService)
+        ILlmService llmService,
+        IOptions<RagOptions> options)
     {
         _embeddingService = embeddingService;
         _vectorStore = vectorStore;
@@ -25,7 +29,7 @@ public class RagService
         _conversationHistory = conversationHistory;
         _reranker = reranker;
         _llmService = llmService;
-        
+        _options = options.Value;
     }
 
     public async Task<RagResponse> AskAsync(
@@ -57,7 +61,7 @@ public class RagService
 
         float[] queryEmbedding =
             await _embeddingService
-                .GenerateEmbeddingAsync(
+                .CreateEmbeddingAsync(
                     rewrittenQuestion);
 
         // ---------------------------------
@@ -73,7 +77,7 @@ public class RagService
         List<SearchResult> results =
             await _vectorStore.SearchAsync(
                 queryEmbedding,
-                limit: 5);
+                limit: _options.TopK);
 
         Console.WriteLine();
         Console.WriteLine(
@@ -91,10 +95,6 @@ public class RagService
         // 4. Dynamic similarity filtering
         // ---------------------------------
 
-        const float minimumScore = 0.65f;
-
-        const float maximumScoreGap = 0.10f;
-
         List<SearchResult> relevantResults = [];
 
         if (results.Count > 0)
@@ -104,11 +104,11 @@ public class RagService
                     result => result.Score);
 
             float relativeThreshold =
-                bestScore - maximumScoreGap;
+                bestScore - _options.MaximumScoreGap;
 
             float effectiveThreshold =
                 Math.Max(
-                    minimumScore,
+                    _options.MinimumScore,
                     relativeThreshold);
 
             relevantResults =
@@ -127,7 +127,7 @@ public class RagService
 
             Console.WriteLine(
                 $"Minimum threshold: " +
-                $"{minimumScore:F4}");
+                $"{_options.MinimumScore:F4}");
 
             Console.WriteLine(
                 $"Relative threshold: " +
@@ -188,6 +188,7 @@ public class RagService
                 relevantResults);
 
         Console.WriteLine();
+
         Console.WriteLine(
             "Reranked results:");
 
@@ -212,18 +213,19 @@ public class RagService
         }
 
         // ---------------------------------
-        // 7. Keep best 3 after reranking
+        // 7. Keep best results after reranking
         // ---------------------------------
 
         relevantResults =
             rerankedResults
-                .Take(3)
+                .Take(_options.FinalContextCount)
                 .Select(
                     result =>
                         result.SearchResult)
                 .ToList();
 
         Console.WriteLine();
+
         Console.WriteLine(
             "Final context selected:");
 
@@ -270,12 +272,13 @@ public class RagService
         // ---------------------------------
 
         Console.WriteLine();
+
         Console.WriteLine(
             "Sending context to LLM...");
 
         string answer =
             await _llmService.GenerateAsync(
-                                prompt);
+                prompt);
 
         // ---------------------------------
         // 11. Build source list

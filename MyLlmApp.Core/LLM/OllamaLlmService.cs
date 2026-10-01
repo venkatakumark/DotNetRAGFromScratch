@@ -1,19 +1,19 @@
 using System.Net.Http.Json;
+using Microsoft.Extensions.Options;
+using MyLlmApp.Core.Configuration;
 
 namespace MyLlmApp.Core.LLM;
 
 public class OllamaLlmService : ILlmService
 {
     private readonly HttpClient _httpClient;
+    private readonly OllamaOptions _options;
 
-    private const string OllamaUrl =
-        "http://localhost:11434/api/chat";
-
-    private const string Model =
-        "granite4.2:latest";
-
-    public OllamaLlmService()
+    public OllamaLlmService(
+        IOptions<OllamaOptions> options)
     {
+        _options = options.Value;
+
         _httpClient = new HttpClient
         {
             Timeout = TimeSpan.FromMinutes(10)
@@ -23,9 +23,12 @@ public class OllamaLlmService : ILlmService
     public async Task<string> GenerateAsync(
         string prompt)
     {
+        string ollamaUrl =
+            $"{_options.BaseUrl.TrimEnd('/')}/api/chat";
+
         var request = new
         {
-            model = Model,
+            model = _options.ChatModel,
 
             messages = new[]
             {
@@ -45,15 +48,16 @@ public class OllamaLlmService : ILlmService
         };
 
         Console.WriteLine();
+
         Console.WriteLine(
-            $"Final Answer Model: {Model}");
+            $"Final Answer Model: {_options.ChatModel}");
 
         Console.WriteLine(
             "Calling local Ollama LLM...");
 
         HttpResponseMessage response =
             await _httpClient.PostAsJsonAsync(
-                OllamaUrl,
+                ollamaUrl,
                 request);
 
         response.EnsureSuccessStatusCode();

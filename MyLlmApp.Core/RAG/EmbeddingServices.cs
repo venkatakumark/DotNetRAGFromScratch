@@ -1,53 +1,53 @@
 using System.Net.Http.Json;
-using System.Text.Json;
+using Microsoft.Extensions.Options;
+using MyLlmApp.Core.Configuration;
 
 namespace MyLlmApp.Core.RAG;
 
 public class EmbeddingService
 {
     private readonly HttpClient _httpClient;
+    private readonly OllamaOptions _options;
 
-    private const string OllamaUrl =
-        "http://localhost:11434/api/embed";
-
-    private const string Model =
-        "nomic-embed-text";
-
-    public EmbeddingService()
+    public EmbeddingService(
+        IOptions<OllamaOptions> options)
     {
-        _httpClient = new HttpClient();
+        _options = options.Value;
+
+        _httpClient = new HttpClient
+        {
+            Timeout = TimeSpan.FromMinutes(5)
+        };
     }
 
-    public async Task<float[]> GenerateEmbeddingAsync(
+    public async Task<float[]> CreateEmbeddingAsync(
         string text)
     {
-        if (string.IsNullOrWhiteSpace(text))
-        {
-            throw new ArgumentException(
-                "Text cannot be empty.",
-                nameof(text));
-        }
+        string url =
+            $"{_options.BaseUrl.TrimEnd('/')}/api/embed";
 
         var request = new
         {
-            model = Model,
+            model = _options.EmbeddingModel,
             input = text
         };
 
-        var response = await _httpClient.PostAsJsonAsync(
-            OllamaUrl,
-            request);
+        HttpResponseMessage response =
+            await _httpClient.PostAsJsonAsync(
+                url,
+                request);
 
         response.EnsureSuccessStatusCode();
 
-        var result =
-            await response.Content.ReadFromJsonAsync<OllamaEmbeddingResponse>();
+        OllamaEmbeddingResponse? result =
+            await response.Content
+                .ReadFromJsonAsync<OllamaEmbeddingResponse>();
 
         if (result?.Embeddings == null ||
             result.Embeddings.Count == 0)
         {
             throw new InvalidOperationException(
-                "Ollama returned no embedding.");
+                "Ollama returned no embeddings.");
         }
 
         return result.Embeddings[0];

@@ -1,21 +1,22 @@
 using System.Net.Http.Json;
 using System.Text;
+using Microsoft.Extensions.Options;
+using MyLlmApp.Core.Configuration;
 
 namespace MyLlmApp.Core.RAG;
 
 public class QueryRewriter
 {
-    private readonly HttpClient _httpClient;
 
-    private const string OllamaUrl =
-        "http://localhost:11434/api/chat";
+   private readonly HttpClient _httpClient;
+private readonly OllamaOptions _options;
 
-    private const string Model =
-        "qwen3:0.6b";
-
-    public QueryRewriter()
+    public QueryRewriter(
+        IOptions<OllamaOptions> options)
     {
-         _httpClient = new HttpClient
+        _options = options.Value;
+
+        _httpClient = new HttpClient
         {
             Timeout = TimeSpan.FromMinutes(3)
         };
@@ -76,7 +77,7 @@ public class QueryRewriter
 
     var request = new
     {
-        model = Model,
+        model = _options.QueryRewriteModel,
 
         messages = new[]
         {
@@ -101,14 +102,14 @@ public class QueryRewriter
 
     Console.WriteLine();
     Console.WriteLine(
-        $"Query Rewriter Model: {Model}");
+        $"Query Rewriter Model: {_options.QueryRewriteModel}");
 
     Console.WriteLine(
         "Calling local Ollama query rewriter...");
 
     HttpResponseMessage response =
         await _httpClient.PostAsJsonAsync(
-            OllamaUrl,
+            _options.BaseUrl.TrimEnd('/') + "/api/chat",
             request);
 
     response.EnsureSuccessStatusCode();

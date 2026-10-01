@@ -1,35 +1,66 @@
-using MyLlmApp.Core.RAG;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using MyLlmApp.Core.Configuration;
 using MyLlmApp.Core.LLM;
+using MyLlmApp.Core.RAG;
 
-ILlmService llmService =
-    new OllamaLlmService();
-var embeddingService =
-    new EmbeddingService();
+HostApplicationBuilder builder =
+    Host.CreateApplicationBuilder(args);
 
-var vectorStore =
-    new VectorStore();
+// ---------------------------------------
+// Configuration
+// ---------------------------------------
 
-var queryRewriter =
-    new QueryRewriter();
+builder.Services.Configure<OllamaOptions>(
+    builder.Configuration.GetSection(
+        OllamaOptions.SectionName));
 
-var conversationHistory =
-    new ConversationHistory();
-    var hybridReranker =
-    new HybridReranker();
+builder.Services.Configure<QdrantOptions>(
+    builder.Configuration.GetSection(
+        QdrantOptions.SectionName));
 
-var ragService =
-    new RagService(
-        embeddingService,
-        vectorStore,
-        queryRewriter,
-        conversationHistory,
-        hybridReranker,
-        llmService);
+builder.Services.Configure<RagOptions>(
+    builder.Configuration.GetSection(
+        RagOptions.SectionName));
 
-var ragEvaluator =
-    new RagEvaluator(
-        ragService,
-        conversationHistory);
+// ---------------------------------------
+// RAG dependencies
+// ---------------------------------------
+
+builder.Services.AddSingleton<EmbeddingService>();
+
+builder.Services.AddSingleton<VectorStore>();
+
+builder.Services.AddSingleton<QueryRewriter>();
+
+builder.Services.AddSingleton<HybridReranker>();
+
+builder.Services.AddSingleton<ILlmService, OllamaLlmService>();
+
+// Console application has one conversation
+// for the lifetime of the application.
+builder.Services.AddSingleton<ConversationHistory>();
+
+builder.Services.AddSingleton<RagService>();
+
+builder.Services.AddSingleton<RagEvaluator>();
+
+// ---------------------------------------
+// Build DI container
+// ---------------------------------------
+
+using IHost host =
+    builder.Build();
+
+RagService ragService =
+    host.Services.GetRequiredService<RagService>();
+
+RagEvaluator ragEvaluator =
+    host.Services.GetRequiredService<RagEvaluator>();
+
+// ---------------------------------------
+// Application menu
+// ---------------------------------------
 
 Console.WriteLine(
     "======================================");
@@ -61,6 +92,7 @@ if (option == "2")
 // ---------------------------------------
 
 Console.WriteLine();
+
 Console.WriteLine(
     "======================================");
 
@@ -71,13 +103,14 @@ Console.WriteLine(
     "======================================");
 
 Console.WriteLine();
+
 Console.WriteLine(
     "Ask questions about the company policy.");
 
 Console.WriteLine(
     "Type 'exit' to quit.");
-Console.WriteLine();
 
+Console.WriteLine();
 
 while (true)
 {
@@ -100,6 +133,7 @@ while (true)
     }
 
     Console.WriteLine();
+
     Console.WriteLine(
         "Searching and generating answer...");
 
@@ -133,6 +167,7 @@ while (true)
     catch (Exception ex)
     {
         Console.WriteLine();
+
         Console.WriteLine(
             $"Error: {ex.Message}");
     }

@@ -47,7 +47,7 @@ public class DocumentIngestionService
 
                 float[] embedding =
                     await _embeddingService
-                        .GenerateEmbeddingAsync(chunk);
+                        .CreateEmbeddingAsync(chunk);
 
                 await _vectorStore.AddChunkAsync(
                     id: nextId,

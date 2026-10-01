@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Options;
+using MyLlmApp.Core.Configuration;
 using Qdrant.Client;
 using Qdrant.Client.Grpc;
 
@@ -6,43 +8,45 @@ namespace MyLlmApp.Core.RAG;
 public class VectorStore
 {
     private readonly QdrantClient _client;
+    private readonly QdrantOptions _options;
 
-    private const string CollectionName =
-        "PolicyDocuments";
-
-    private const int VectorDimension = 768;
-
-    public VectorStore()
+    public VectorStore(
+        IOptions<QdrantOptions> options)
     {
+        _options = options.Value;
+
         _client = new QdrantClient(
-            host: "localhost",
-            port: 6334);
+            host: _options.Host,
+            port: _options.Port);
     }
 
     public async Task CreateCollectionAsync()
     {
         bool exists =
             await _client.CollectionExistsAsync(
-                CollectionName);
+                _options.CollectionName);
 
         if (exists)
         {
             Console.WriteLine(
-                $"Collection '{CollectionName}' already exists.");
+                $"Collection '{_options.CollectionName}' already exists.");
 
             return;
         }
 
+        Console.WriteLine(
+            $"Creating collection '{_options.CollectionName}'...");
+
         await _client.CreateCollectionAsync(
-            CollectionName,
-            new VectorParams
+            collectionName: _options.CollectionName,
+            vectorsConfig: new VectorParams
             {
-                Size = VectorDimension,
+                Size = _options.VectorSize,
                 Distance = Distance.Cosine
             });
 
         Console.WriteLine(
-            $"Collection '{CollectionName}' created.");
+            $"Collection '{_options.CollectionName}' created.");
     }
 
     public async Task AddChunkAsync(
@@ -52,82 +56,77 @@ public class VectorStore
         string source,
         int chunkIndex)
     {
-        if (embedding.Length != VectorDimension)
-        {
-            throw new ArgumentException(
-                $"Expected {VectorDimension} dimensions " +
-                $"but received {embedding.Length}.");
-        }
-
-        var point = new PointStruct
-        {
-            Id = id,
-            Vectors = embedding,
-
-            Payload =
+        PointStruct point =
+            new()
             {
-                ["text"] = text,
-                ["source"] = source,
-                ["chunkIndex"] = chunkIndex
-            }
-        };
+                Id = id,
+                Vectors = embedding
+            };
+
+        point.Payload["text"] =
+            new Value
+            {
+                StringValue = text
+            };
+
+        point.Payload["source"] =
+            new Value
+            {
+                StringValue = source
+            };
+
+        point.Payload["chunkIndex"] =
+            new Value
+            {
+                IntegerValue = chunkIndex
+            };
 
         await _client.UpsertAsync(
-            CollectionName,
-            new[] { point });
-
-        Console.WriteLine(
-            $"Stored chunk {chunkIndex} " +
-            $"from '{source}' with ID {id}.");
+            collectionName: _options.CollectionName,
+            points: new[]
+            {
+                point
+            });
     }
 
     public async Task<List<SearchResult>> SearchAsync(
         float[] queryEmbedding,
         int limit = 3)
     {
-        if (queryEmbedding.Length != VectorDimension)
-        {
-            throw new ArgumentException(
-                $"Expected {VectorDimension} dimensions " +
-                $"but received {queryEmbedding.Length}.");
-        }
-
-        var results = await _client.QueryAsync(
-            CollectionName,
-            queryEmbedding,
-            limit: (ulong)limit,
-            payloadSelector: true);
+        IReadOnlyList<ScoredPoint> results =
+            await _client.QueryAsync(
+                collectionName: _options.CollectionName,
+                query: queryEmbedding,
+                limit: (ulong)limit);
 
         List<SearchResult> searchResults = [];
 
-        foreach (var result in results)
+        foreach (ScoredPoint result in results)
         {
             string text = "";
-
             string source = "";
-
-            int chunkIndex = -1;
+            int chunkIndex = 0;
 
             if (result.Payload.TryGetValue(
-                "text",
-                out Value textValue))
+                    "text",
+                    out Value? textValue))
             {
-                text = textValue.StringValue;
+                text = textValue.StringValue ?? "";
             }
 
             if (result.Payload.TryGetValue(
-                "source",
-                out Value sourceValue))
+                    "source",
+                    out Value? sourceValue))
             {
-                source = sourceValue.StringValue;
+                source = sourceValue.StringValue ?? "";
             }
 
             if (result.Payload.TryGetValue(
-                "chunkIndex",
-                out Value chunkValue))
+                    "chunkIndex",
+                    out Value? chunkIndexValue))
             {
                 chunkIndex =
-                    (int)chunkValue.IntegerValue;
+                    (int)chunkIndexValue.IntegerValue;
             }
 
             searchResults.Add(
