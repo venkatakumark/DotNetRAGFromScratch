@@ -1,6 +1,6 @@
 using System.Net.Http.Json;
 
-namespace MyLlmApp.LLM;
+namespace MyLlmApp.Core.LLM;
 
 public class OllamaLlmService : ILlmService
 {

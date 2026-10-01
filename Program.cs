@@ -1,5 +1,5 @@
-using MyLlmApp.RAG;
-using MyLlmApp.LLM;
+using MyLlmApp.Core.RAG;
+using MyLlmApp.Core.LLM;
 
 ILlmService llmService =
     new OllamaLlmService();

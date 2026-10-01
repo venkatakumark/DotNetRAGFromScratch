@@ -1,7 +1,7 @@
 using System.Net.Http.Json;
 using System.Text;
 
-namespace MyLlmApp.RAG;
+namespace MyLlmApp.Core.RAG;
 
 public class QueryRewriter
 {

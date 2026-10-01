@@ -1,6 +1,6 @@
 using System.Text.RegularExpressions;
 
-namespace MyLlmApp.RAG;
+namespace MyLlmApp.Core.RAG;
 
 public class TextChunker
 {

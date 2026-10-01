@@ -1,4 +1,4 @@
-namespace MyLlmApp.LLM;
+namespace MyLlmApp.Core.LLM;
 
 public interface ILlmService
 {

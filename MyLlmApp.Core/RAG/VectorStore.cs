@@ -1,7 +1,7 @@
 using Qdrant.Client;
 using Qdrant.Client.Grpc;
 
-namespace MyLlmApp.RAG;
+namespace MyLlmApp.Core.RAG;
 
 public class VectorStore
 {

@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="MyLlmApp.Api/MyLlmApp.Api.csproj" />
+  <Project Path="MyLlmApp.Core/MyLlmApp.Core.csproj" />
+  <Project Path="MyLlmApp.csproj" />
+</Solution>

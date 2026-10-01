@@ -1,7 +1,7 @@
 
-using MyLlmApp.LLM;
+using MyLlmApp.Core.LLM;
 
-namespace MyLlmApp.RAG;
+namespace MyLlmApp.Core.RAG;
 
 public class RagService
 {
