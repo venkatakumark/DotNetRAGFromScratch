@@ -1,0 +1,4 @@
+Employees can work from home up to two days per week.
+Remote work requires manager approval. Employees must
+remain available during normal working hours while
+working remotely.

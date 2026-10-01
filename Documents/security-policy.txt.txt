@@ -1,0 +1,5 @@
+Employees working remotely must use company-approved
+devices and secure network connections. Confidential
+company information must not be stored on personal
+devices. Employees must report suspected security
+incidents to the IT security team.
