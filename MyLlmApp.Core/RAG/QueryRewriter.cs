@@ -7,9 +7,8 @@ namespace MyLlmApp.Core.RAG;
 
 public class QueryRewriter
 {
-
-   private readonly HttpClient _httpClient;
-private readonly OllamaOptions _options;
+    private readonly HttpClient _httpClient;
+    private readonly OllamaOptions _options;
 
     public QueryRewriter(
         IOptions<OllamaOptions> options)
@@ -22,14 +21,11 @@ private readonly OllamaOptions _options;
         };
     }
 
-   public async Task<string> RewriteAsync(
+    public async Task<string> RewriteAsync(
     string currentQuestion,
-    ConversationHistory history)
+    ConversationHistory history,
+    CancellationToken cancellationToken)
 {
-    // ---------------------------------------
-    // 1. No history = no rewrite required
-    // ---------------------------------------
-
     if (!history.HasHistory)
     {
         Console.WriteLine();
@@ -39,28 +35,39 @@ private readonly OllamaOptions _options;
         return currentQuestion;
     }
 
-    // ---------------------------------------
-    // 2. Build conversation history
-    // ---------------------------------------
-
     string conversation =
         BuildConversation(history);
 
-    // ---------------------------------------
-    // 3. Build a simple prompt
-    //    Small models work better with
-    //    direct and explicit instructions.
-    // ---------------------------------------
-
     string prompt = $"""
-        Rewrite the current question so it can be understood
-        without the previous conversation.
+        Convert the current question into a standalone
+        search question using the previous conversation.
 
-        Replace words like "it", "them", "they", "that",
-        "those", "he", "she" with what they refer to.
+        Rules:
+        - Preserve the meaning of the current question.
+        - Resolve pronouns and references using the previous conversation.
+        - Replace words such as "it", "them", "they", "that",
+          "those", "he", and "she" with the specific subject
+          they refer to.
+        - Include the important subject from the previous conversation
+          when the current question depends on it.
+        - Do not replace one pronoun with another pronoun.
+        - Do not invent information that is not present in the conversation.
+        - Do not answer the question.
+        - Return only the rewritten question.
+        - If the current question is already standalone,
+          return it unchanged.
 
-        Do not answer the question.
-        Return only one rewritten question.
+        Example:
+
+        Previous conversation:
+        User: Who approves leave requests?
+        Assistant: Managers approve leave requests.
+
+        Current question:
+        How many days in advance should I request it?
+
+        Rewritten question:
+        How many days in advance should I submit a leave request?
 
         Previous conversation:
         {conversation}
@@ -70,10 +77,6 @@ private readonly OllamaOptions _options;
 
         Rewritten question:
         """;
-
-    // ---------------------------------------
-    // 4. Build Ollama request
-    // ---------------------------------------
 
     var request = new
     {
@@ -96,10 +99,6 @@ private readonly OllamaOptions _options;
         }
     };
 
-    // ---------------------------------------
-    // 5. Call local Ollama
-    // ---------------------------------------
-
     Console.WriteLine();
     Console.WriteLine(
         $"Query Rewriter Model: {_options.QueryRewriteModel}");
@@ -110,25 +109,17 @@ private readonly OllamaOptions _options;
     HttpResponseMessage response =
         await _httpClient.PostAsJsonAsync(
             _options.BaseUrl.TrimEnd('/') + "/api/chat",
-            request);
+            request,
+            cancellationToken);
 
     response.EnsureSuccessStatusCode();
 
-    // ---------------------------------------
-    // 6. Read Ollama response
-    // ---------------------------------------
-
     OllamaChatResponse? result =
-        await response.Content
-            .ReadFromJsonAsync<OllamaChatResponse>();
+        await response.Content.ReadFromJsonAsync<OllamaChatResponse>(
+            cancellationToken: cancellationToken);
 
     string? rewrittenQuestion =
         result?.Message?.Content;
-
-    // ---------------------------------------
-    // 7. Fallback if Ollama returned
-    //    an empty response
-    // ---------------------------------------
 
     if (string.IsNullOrWhiteSpace(
         rewrittenQuestion))
@@ -142,44 +133,34 @@ private readonly OllamaOptions _options;
         return currentQuestion;
     }
 
-    // ---------------------------------------
-    // 8. Clean result
-    // ---------------------------------------
-
     rewrittenQuestion =
         rewrittenQuestion.Trim();
 
-    // ---------------------------------------
-    // 9. Debug output
-    // ---------------------------------------
-
     Console.WriteLine(
         $"Query Rewrite Result: {rewrittenQuestion}");
-
-    // ---------------------------------------
-    // 10. Return standalone question
-    // ---------------------------------------
 
     return rewrittenQuestion;
 }
 
     private static string BuildConversation(
-    ConversationHistory history)
+        ConversationHistory history)
     {
-    const int maxMessages = 6;
-    // 6 messages = approximately 3 User/Assistant turns
+        const int maxMessages = 6;
 
-    StringBuilder builder = new();
+        // 6 messages =
+        // approximately 3 User/Assistant turns
 
-    var recentMessages =
-        history.Messages
-            .TakeLast(maxMessages);
+        StringBuilder builder = new();
+
+        var recentMessages =
+            history.Messages
+                .TakeLast(maxMessages);
 
         foreach (ConversationMessage message
-             in recentMessages)
+                 in recentMessages)
         {
             builder.AppendLine(
-             $"{message.Role}: {message.Content}");
+                $"{message.Role}: {message.Content}");
         }
 
         return builder.ToString();

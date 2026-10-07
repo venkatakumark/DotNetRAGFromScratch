@@ -21,37 +21,37 @@ public class EmbeddingService
     }
 
     public async Task<float[]> CreateEmbeddingAsync(
-        string text)
+    string text,
+    CancellationToken cancellationToken)
+{
+    var request = new
     {
-        string url =
-            $"{_options.BaseUrl.TrimEnd('/')}/api/embed";
+        model = _options.EmbeddingModel,
+        input = text
+    };
 
-        var request = new
-        {
-            model = _options.EmbeddingModel,
-            input = text
-        };
+    HttpResponseMessage response =
+        await _httpClient.PostAsJsonAsync(
+            _options.BaseUrl.TrimEnd('/') + "/api/embed",
+            request,
+            cancellationToken);
 
-        HttpResponseMessage response =
-            await _httpClient.PostAsJsonAsync(
-                url,
-                request);
+    response.EnsureSuccessStatusCode();
 
-        response.EnsureSuccessStatusCode();
+    OllamaEmbeddingResponse? result =
+        await response.Content
+            .ReadFromJsonAsync<OllamaEmbeddingResponse>(
+                cancellationToken: cancellationToken);
 
-        OllamaEmbeddingResponse? result =
-            await response.Content
-                .ReadFromJsonAsync<OllamaEmbeddingResponse>();
-
-        if (result?.Embeddings == null ||
-            result.Embeddings.Count == 0)
-        {
-            throw new InvalidOperationException(
-                "Ollama returned no embeddings.");
-        }
-
-        return result.Embeddings[0];
+    if (result?.Embeddings == null ||
+        result.Embeddings.Count == 0)
+    {
+        throw new InvalidOperationException(
+            "Ollama returned no embeddings.");
     }
+
+    return result.Embeddings[0];
+}
 
     private class OllamaEmbeddingResponse
     {

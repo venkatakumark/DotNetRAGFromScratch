@@ -19,65 +19,70 @@ public class OllamaLlmService : ILlmService
             Timeout = TimeSpan.FromMinutes(10)
         };
     }
+public async Task<string> GenerateAsync(
+    string prompt)
+{
+    return await GenerateAsync(
+        prompt,
+        CancellationToken.None);
+}
 
-    public async Task<string> GenerateAsync(
-        string prompt)
+public async Task<string> GenerateAsync(
+    string prompt,
+    CancellationToken cancellationToken)
+{
+    var request = new
     {
-        string ollamaUrl =
-            $"{_options.BaseUrl.TrimEnd('/')}/api/chat";
+        model = _options.ChatModel,
 
-        var request = new
+        messages = new[]
         {
-            model = _options.ChatModel,
-
-            messages = new[]
+            new
             {
-                new
-                {
-                    role = "user",
-                    content = prompt
-                }
-            },
-
-            stream = false,
-
-            options = new
-            {
-                temperature = 0
+                role = "user",
+                content = prompt
             }
-        };
+        },
 
-        Console.WriteLine();
+        stream = false,
 
-        Console.WriteLine(
-            $"Final Answer Model: {_options.ChatModel}");
-
-        Console.WriteLine(
-            "Calling local Ollama LLM...");
-
-        HttpResponseMessage response =
-            await _httpClient.PostAsJsonAsync(
-                ollamaUrl,
-                request);
-
-        response.EnsureSuccessStatusCode();
-
-        OllamaChatResponse? result =
-            await response.Content
-                .ReadFromJsonAsync<OllamaChatResponse>();
-
-        string? answer =
-            result?.Message?.Content;
-
-        if (string.IsNullOrWhiteSpace(answer))
+        options = new
         {
-            throw new InvalidOperationException(
-                "Ollama returned an empty response.");
+            temperature = 0
         }
+    };
 
-        return answer.Trim();
+    Console.WriteLine();
+    Console.WriteLine(
+        $"LLM Model: {_options.ChatModel}");
+
+    Console.WriteLine(
+        "Calling local Ollama LLM...");
+
+    HttpResponseMessage response =
+        await _httpClient.PostAsJsonAsync(
+            _options.BaseUrl.TrimEnd('/') + "/api/chat",
+            request,
+            cancellationToken);
+
+    response.EnsureSuccessStatusCode();
+
+    OllamaChatResponse? result =
+        await response.Content
+            .ReadFromJsonAsync<OllamaChatResponse>(
+                cancellationToken: cancellationToken);
+
+    string? answer =
+        result?.Message?.Content;
+
+    if (string.IsNullOrWhiteSpace(answer))
+    {
+        throw new InvalidOperationException(
+            "Ollama returned an empty response.");
     }
 
+    return answer.Trim();
+}
     private class OllamaChatResponse
     {
         public OllamaMessage? Message { get; set; }

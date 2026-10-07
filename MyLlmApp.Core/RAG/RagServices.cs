@@ -32,8 +32,48 @@ public class RagService
         _options = options.Value;
     }
 
+    // =====================================
+    // Existing method
+    //
+    // Used by Console application.
+    // Uses the ConversationHistory supplied
+    // through dependency injection.
+    // =====================================
+
     public async Task<RagResponse> AskAsync(
         string question)
+    {
+        return await AskInternalAsync(
+            question,
+            _conversationHistory,CancellationToken.None);
+    }
+
+    // =====================================
+    // New overload
+    //
+    // Used by Web API.
+    // Allows the API to supply the history
+    // associated with a conversationId.
+    // =====================================
+
+    public async Task<RagResponse> AskAsync(
+        string question,
+        ConversationHistory conversationHistory,
+        CancellationToken cancellationToken)
+    {
+        return await AskInternalAsync(
+            question,
+            conversationHistory,CancellationToken.None);
+    }
+
+    // =====================================
+    // Internal RAG pipeline
+    // =====================================
+
+    private async Task<RagResponse> AskInternalAsync(
+        string question,
+        ConversationHistory conversationHistory,
+        CancellationToken cancellationToken)
     {
         // ---------------------------------
         // 1. Rewrite question using history
@@ -42,7 +82,7 @@ public class RagService
         string rewrittenQuestion =
             await _queryRewriter.RewriteAsync(
                 question,
-                _conversationHistory);
+                conversationHistory,cancellationToken);
 
         Console.WriteLine();
         Console.WriteLine(
@@ -62,7 +102,7 @@ public class RagService
         float[] queryEmbedding =
             await _embeddingService
                 .CreateEmbeddingAsync(
-                    rewrittenQuestion);
+                    rewrittenQuestion,cancellationToken);
 
         // ---------------------------------
         // 3. Search Qdrant
@@ -77,9 +117,11 @@ public class RagService
         List<SearchResult> results =
             await _vectorStore.SearchAsync(
                 queryEmbedding,
-                limit: _options.TopK);
+                limit: _options.TopK,
+                 cancellationToken: cancellationToken);
 
         Console.WriteLine();
+
         Console.WriteLine(
             "Retrieved context:");
 
@@ -104,7 +146,8 @@ public class RagService
                     result => result.Score);
 
             float relativeThreshold =
-                bestScore - _options.MaximumScoreGap;
+                bestScore -
+                _options.MaximumScoreGap;
 
             float effectiveThreshold =
                 Math.Max(
@@ -164,6 +207,7 @@ public class RagService
                 "in the provided documents.";
 
             SaveConversation(
+                conversationHistory,
                 question,
                 noAnswer);
 
@@ -218,7 +262,8 @@ public class RagService
 
         relevantResults =
             rerankedResults
-                .Take(_options.FinalContextCount)
+                .Take(
+                    _options.FinalContextCount)
                 .Select(
                     result =>
                         result.SearchResult)
@@ -306,6 +351,7 @@ public class RagService
         // ---------------------------------
 
         SaveConversation(
+            conversationHistory,
             question,
             answer);
 
@@ -324,15 +370,16 @@ public class RagService
     // Save conversation
     // =====================================
 
-    private void SaveConversation(
+    private static void SaveConversation(
+        ConversationHistory conversationHistory,
         string question,
         string answer)
     {
-        _conversationHistory
+        conversationHistory
             .AddUserMessage(
                 question);
 
-        _conversationHistory
+        conversationHistory
             .AddAssistantMessage(
                 answer);
     }

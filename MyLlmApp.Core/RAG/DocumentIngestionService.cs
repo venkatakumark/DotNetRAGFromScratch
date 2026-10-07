@@ -47,7 +47,7 @@ public class DocumentIngestionService
 
                 float[] embedding =
                     await _embeddingService
-                        .CreateEmbeddingAsync(chunk);
+                        .CreateEmbeddingAsync(chunk,CancellationToken.None);
 
                 await _vectorStore.AddChunkAsync(
                     id: nextId,
@@ -71,4 +71,114 @@ public class DocumentIngestionService
         Console.WriteLine("ALL DOCUMENTS INGESTED");
         Console.WriteLine("======================================");
     }
+   public async Task<DocumentIngestionResult> IngestDocumentAsync(
+    string text,
+    string fileName,
+    string contentType,
+    CancellationToken cancellationToken)
+{
+    if (string.IsNullOrWhiteSpace(text))
+    {
+        throw new ArgumentException(
+            "Document text cannot be empty.",
+            nameof(text));
+    }
+
+    if (string.IsNullOrWhiteSpace(fileName))
+    {
+        throw new ArgumentException(
+            "File name cannot be empty.",
+            nameof(fileName));
+    }
+
+    await _vectorStore.CreateCollectionAsync();
+
+    // Calculate SHA-256 from document content.
+    byte[] contentBytes =
+        System.Text.Encoding.UTF8.GetBytes(text);
+
+    byte[] hashBytes =
+        System.Security.Cryptography.SHA256.HashData(
+            contentBytes);
+
+    string documentHash =
+        Convert.ToHexString(hashBytes)
+            .ToLowerInvariant();
+
+    // Check whether the same content is already indexed.
+    IndexedDocument? existingDocument =
+        await _vectorStore.FindDocumentByHashAsync(
+            documentHash,
+            cancellationToken);
+
+    if (existingDocument is not null)
+    {
+        throw new InvalidOperationException(
+            $"Document already indexed as '{existingDocument.FileName}' " +
+            $"with documentId '{existingDocument.DocumentId}'.");
+    }
+
+    string documentId =
+        Guid.NewGuid().ToString("N");
+
+    List<string> chunks =
+        _chunker.SplitText(text);
+
+    if (chunks.Count == 0)
+    {
+        throw new InvalidOperationException(
+            "No text chunks were created from the document.");
+    }
+
+    for (int i = 0; i < chunks.Count; i++)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        string chunk = chunks[i];
+
+        float[] embedding =
+            await _embeddingService.CreateEmbeddingAsync(
+                chunk,
+                cancellationToken);
+
+        ulong pointId =
+            CreatePointId(documentId, i);
+
+        await _vectorStore.AddChunkAsync(
+            id: pointId,
+            embedding: embedding,
+            text: chunk,
+            source: fileName,
+            chunkIndex: i,
+            documentId: documentId,
+            contentType: contentType,
+            documentHash: documentHash,
+            cancellationToken: cancellationToken);
+    }
+
+    return new DocumentIngestionResult
+    {
+        DocumentId = documentId,
+        FileName = fileName,
+        ChunkCount = chunks.Count
+    };
+}
+private static ulong CreatePointId(
+    string documentId,
+    int chunkIndex)
+{
+    string value =
+        $"{documentId}:{chunkIndex}";
+
+    byte[] bytes =
+        System.Text.Encoding.UTF8.GetBytes(value);
+
+    byte[] hash =
+        System.Security.Cryptography.SHA256.HashData(
+            bytes);
+
+    return BitConverter.ToUInt64(
+        hash,
+        0);
+}
 }
