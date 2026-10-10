@@ -45,6 +45,7 @@ builder.Services.AddSingleton<ILlmService, OllamaLlmService>();
 builder.Services.AddSingleton<IDocumentTextExtractor, TxtDocumentTextExtractor>();
 builder.Services.AddSingleton<IDocumentTextExtractor, PdfDocumentTextExtractor>();
 builder.Services.AddSingleton<IDocumentTextExtractor, DocxDocumentTextExtractor>();
+builder.Services.AddSingleton<DocumentFileProcessor>();
 
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 builder.Services.AddProblemDetails();
@@ -142,85 +143,47 @@ app.MapDelete(
             });
     });
 
-app.MapPost(
-    "/api/documents/upload",
+app.MapPost("/api/documents/upload",
     async (
         IFormFile file,
-        IEnumerable<IDocumentTextExtractor> extractors,
+        DocumentFileProcessor fileProcessor,
         DocumentIngestionService ingestionService,
         CancellationToken cancellationToken) =>
     {
-        if (file is null || file.Length == 0)
-        {
-            return Results.BadRequest(
-                new
-                {
-                    error = "A file is required."
-                });
-        }
-
-        const long maxFileSize = 5 * 1024 * 1024;
-
-        if (file.Length > maxFileSize)
-        {
-            return Results.BadRequest(
-                new
-                {
-                    error = "File size cannot exceed 5 MB."
-                });
-        }
-
-        string extension = Path.GetExtension(file.FileName);
-
-        IDocumentTextExtractor? extractor =
-            extractors.FirstOrDefault(e => e.CanHandle(extension));
-
-        if (extractor is null)
-        {
-            return Results.BadRequest(
-                new
-                {
-                    error =
-                        $"Unsupported file type '{extension}'. " +
-                        "Currently supported types are .txt and .pdf."
-                });
-        }
-
-        string text;
-
-        using (Stream stream = file.OpenReadStream())
-        {
-            text = await extractor.ExtractTextAsync(
-                stream,
-                cancellationToken);
-        }
-
-        if (string.IsNullOrWhiteSpace(text))
-        {
-            return Results.BadRequest(
-                new
-                {
-                    error = "No readable text could be extracted from the document."
-                });
-        }
-
         try
         {
+            DocumentFileProcessResult document =
+                await fileProcessor.ProcessAsync(
+                    file,
+                    cancellationToken);
+
+           DateTimeOffset now = DateTimeOffset.UtcNow;
+
             DocumentIngestionResult result =
-                await ingestionService.IngestDocumentAsync(
-                    text: text,
-                    fileName: Path.GetFileName(file.FileName),
-                    contentType: file.ContentType,
-                    cancellationToken: cancellationToken);
+            await ingestionService.IngestDocumentAsync(
+            fileName: document.FileName,
+            text: document.Text,
+            contentType: document.ContentType,
+            fileSizeBytes: document.FileSizeBytes,
+            createdAt: now,
+            updatedAt: now,
+            cancellationToken: cancellationToken);
 
             return Results.Ok(result);
         }
-        catch (InvalidOperationException ex)
-            when (ex.Message.StartsWith(
-                "Document already indexed",
-                StringComparison.Ordinal))
+        catch (DuplicateDocumentException ex)
         {
             return Results.Conflict(
+                new
+                {
+                    error = "Document already indexed.",
+                    documentId = ex.DocumentId,
+                    fileName = ex.FileName
+                });
+        }
+        catch (ArgumentException ex)
+        {
+            return Results.BadRequest(
                 new
                 {
                     error = ex.Message
@@ -229,8 +192,7 @@ app.MapPost(
     })
     .DisableAntiforgery();
 
-app.MapGet(
-    "/api/documents",
+app.MapGet("/api/documents",
     async (
         VectorStore vectorStore,
         CancellationToken cancellationToken) =>
@@ -241,11 +203,69 @@ app.MapGet(
         return Results.Ok(documents);
     });
 
-app.MapDelete(
-    "/api/documents/{documentId}",
+app.MapDelete("/api/documents/{documentId}",
     async (
         string documentId,
         VectorStore vectorStore,
+        ILogger<Program> logger,
+        CancellationToken cancellationToken) =>
+    {
+        if (string.IsNullOrWhiteSpace(documentId))
+        {
+            return Results.BadRequest(new
+            {
+                error = "DocumentId is required."
+            });
+        }
+
+        logger.LogInformation(
+            "Document deletion requested. DocumentId={DocumentId}",
+            documentId);
+
+        List<IndexedDocument> documents =
+            await vectorStore.GetDocumentsAsync(cancellationToken);
+
+        IndexedDocument? existingDocument =
+            documents.FirstOrDefault(d =>
+                d.DocumentId.Equals(
+                    documentId,
+                    StringComparison.OrdinalIgnoreCase));
+
+        if (existingDocument is null)
+        {
+            logger.LogWarning(
+                "Document deletion rejected. Document not found. DocumentId={DocumentId}",
+                documentId);
+
+            return Results.NotFound(new
+            {
+                error = "Document not found.",
+                documentId
+            });
+        }
+
+        await vectorStore.DeleteDocumentAsync(
+            documentId,
+            cancellationToken);
+
+        logger.LogInformation(
+            "Document deleted successfully. DocumentId={DocumentId}, FileName={FileName}",
+            documentId,
+            existingDocument.FileName);
+
+        return Results.Ok(new
+        {
+            message = "Document deleted successfully.",
+            documentId
+        });
+    });
+app.MapPut("/api/documents/{documentId}",
+    async (
+        string documentId,
+        IFormFile file,
+        DocumentFileProcessor fileProcessor,
+        VectorStore vectorStore,
+        DocumentIngestionService ingestionService,
         CancellationToken cancellationToken) =>
     {
         if (string.IsNullOrWhiteSpace(documentId))
@@ -257,18 +277,66 @@ app.MapDelete(
                 });
         }
 
-        await vectorStore.DeleteDocumentAsync(
-            documentId,
-            cancellationToken);
+        // Verify that the document being replaced exists.
+        List<IndexedDocument> documents =
+            await vectorStore.GetDocumentsAsync(
+                cancellationToken);
 
-        return Results.Ok(
-            new
-            {
-                message = "Document deleted successfully.",
-                documentId
-            });
-    });
+        IndexedDocument? existingDocument =
+            documents.FirstOrDefault(
+                d => d.DocumentId.Equals(
+                    documentId,
+                    StringComparison.OrdinalIgnoreCase));
 
+        if (existingDocument is null)
+        {
+            return Results.NotFound(
+                new
+                {
+                    error = "Document not found.",
+                    documentId
+                });
+        }
+
+        try
+        {
+            DocumentFileProcessResult document =
+                await fileProcessor.ProcessAsync(
+                    file,
+                    cancellationToken);
+
+            DocumentUpdateResult result =
+                await ingestionService.ReplaceDocumentAsync(
+                    oldDocumentId: documentId,
+                    text: document.Text,
+                    fileName: document.FileName,
+                    contentType: document.ContentType,
+                    fileSizeBytes: document.FileSizeBytes,
+                    originalCreatedAt: existingDocument.CreatedAt,
+                    cancellationToken: cancellationToken);
+
+            return Results.Ok(result);
+        }
+        catch (DuplicateDocumentException ex)
+        {
+            return Results.Conflict(
+                new
+                {
+                    error = "Document already indexed.",
+                    documentId = ex.DocumentId,
+                    fileName = ex.FileName
+                });
+        }
+        catch (ArgumentException ex)
+        {
+            return Results.BadRequest(
+                new
+                {
+                    error = ex.Message
+                });
+        }
+    })
+    .DisableAntiforgery();
 app.MapHealthChecks("/health");
 app.Run();
 
