@@ -17,6 +17,10 @@ obj/
 # Logs
 *.log
 
+# Graphify output
+graphify-out/
+/graphify-out/**
+
 # OS files
 Thumbs.db
 .DS_Store

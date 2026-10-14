@@ -41,7 +41,58 @@ builder.Services
     .AddCheck<QdrantHealthCheck>("qdrant");
 
 // LLM provider
-builder.Services.AddSingleton<ILlmService, OllamaLlmService>();
+
+string llmProvider =
+    builder.Configuration["LLM:Provider"] ?? "Ollama";
+
+if (llmProvider.Equals(
+        "Groq",
+        StringComparison.OrdinalIgnoreCase))
+{
+    builder.Services.AddHttpClient("Groq");
+
+    builder.Services.AddTransient<ILlmService>(
+        serviceProvider =>
+        {
+            IConfiguration configuration =
+                serviceProvider.GetRequiredService<IConfiguration>();
+
+            IHttpClientFactory httpClientFactory =
+                serviceProvider.GetRequiredService<IHttpClientFactory>();
+
+            string apiKey =
+                configuration["Groq:ApiKey"]
+                ?? throw new InvalidOperationException(
+                    "Groq API key is not configured.");
+
+            string model =
+                configuration["Groq:Model"]
+                ?? "openai/gpt-oss-20b";
+
+            HttpClient httpClient =
+                httpClientFactory.CreateClient("Groq");
+
+            return new GroqLlmService(
+                httpClient,
+                apiKey,
+                model);
+        });
+}
+else if (llmProvider.Equals(
+             "Ollama",
+             StringComparison.OrdinalIgnoreCase))
+{
+    builder.Services.AddSingleton<ILlmService, OllamaLlmService>();
+}
+else
+{
+    throw new InvalidOperationException(
+        $"Unsupported LLM provider: {llmProvider}");
+}
+
+Console.WriteLine(
+    $"Configured LLM provider: {llmProvider}");
+
 builder.Services.AddSingleton<IDocumentTextExtractor, TxtDocumentTextExtractor>();
 builder.Services.AddSingleton<IDocumentTextExtractor, PdfDocumentTextExtractor>();
 builder.Services.AddSingleton<IDocumentTextExtractor, DocxDocumentTextExtractor>();
@@ -50,9 +101,22 @@ builder.Services.AddSingleton<DocumentFileProcessor>();
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 builder.Services.AddProblemDetails();
 
+// CORS for frontend development
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowVite", policy =>
+    {
+        policy.WithOrigins("http://localhost:3000")
+            .AllowAnyHeader()
+            .AllowAnyMethod();
+    });
+});
+
 var app = builder.Build();
 
 app.UseExceptionHandler();
+
+app.UseCors("AllowVite");
 
 if (app.Environment.IsDevelopment())
 {
